@@ -4,7 +4,7 @@ on:
   push:
     tags:
       - "v[0-9]+.[0-9]+.[0-9]+"
-    branches: [main, next]
+    branches: [main, next, familychat]
   workflow_dispatch: # A build was manually requested
 
 permissions:
@@ -25,9 +25,6 @@ jobs:
           - platform: linux/amd64
             runs_on: ubuntu-latest
             suffix: linux-amd64
-          - platform: linux/arm64
-            runs_on: ubuntu-24.04-arm
-            suffix: linux-arm64
     steps:
       - name: Set up Docker Buildx
         id: buildx
@@ -42,12 +39,6 @@ jobs:
         shell: bash
         run: |
           echo "PALPO_VERSION=$(sed -nE 's/^\s*version = "(.*?)"/\1/p' Cargo.toml)" >> $GITHUB_ENV
-
-      - name: Log in to DockerHub
-        uses: docker/login-action@v4
-        with:
-          username: ${{ vars.DOCKERHUB_USER || secrets.DOCKERHUB_USER }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Log in to GHCR
         uses: docker/login-action@v4
@@ -76,7 +67,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v6
         with:
-          images: palpo-im/palpo
+          images: ghcr.io/${{ github.repository }}
           # Prevent `latest` to be updated for each new tag pushed.
           # We need latest and `vX.Y` tags to only be pushed for the stable Palpo releases.
           flavor: latest=false
@@ -101,8 +92,7 @@ jobs:
             gitsha1=${{ github.sha }}
             org.opencontainers.image.version=${{ env.PALPO_VERSION }}
           tags: |
-            docker.io/palpo/palpo
-            ghcr.io/palpo-im/palpo
+            ghcr.io/${{ github.repository }}
           context: .
           file: ./build/docker/Dockerfile.palpo
           platforms: ${{ matrix.platform }}
@@ -132,8 +122,7 @@ jobs:
     strategy:
       matrix:
         repository:
-          - docker.io/palpo/palpo
-          - ghcr.io/palpo-im/palpo
+          - ghcr.io/${{ github.repository }}
 
     needs:
       - build
@@ -144,13 +133,6 @@ jobs:
           path: ${{ runner.temp }}/digests
           pattern: digests-*
           merge-multiple: true
-
-      - name: Log in to DockerHub
-        uses: docker/login-action@v4
-        if: ${{ startsWith(matrix.repository, 'docker.io') }}
-        with:
-          username: ${{ vars.DOCKERHUB_USER || secrets.DOCKERHUB_USER }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Log in to GHCR
         uses: docker/login-action@v4
