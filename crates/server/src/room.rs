@@ -508,12 +508,22 @@ pub async fn admin_servers(
         .users
         .iter()
         .filter(|(_, level)| **level > power_levels.users_default)
-        .map(|(user_id, _)| user_id.server_name())
-        .collect::<HashSet<_>>();
+        .map(|(user_id, _)| user_id.server_name().to_owned())
+        .collect::<HashSet<OwnedServerName>>();
+    // Room creators are privileged too. From room version 12 they are never
+    // listed in the power levels `users` map (their power is implied by the
+    // create event), so a v12 room whose only privileged member is its
+    // creator would otherwise have no admin server at all — and callers such
+    // as `/messages` backfill would silently fetch nothing.
+    if let Ok(create_event) = get_create(room_id).await
+        && let Ok(creators) = create_event.creators()
+    {
+        admin_servers.extend(creators.iter().map(|user_id| user_id.server_name().to_owned()));
+    }
     if !include_self_server {
         admin_servers.remove(config::server_name());
     }
-    Ok(admin_servers.into_iter().map(|s| s.to_owned()).collect())
+    Ok(admin_servers.into_iter().collect())
 }
 
 pub async fn public_room_ids() -> AppResult<Vec<OwnedRoomId>> {
