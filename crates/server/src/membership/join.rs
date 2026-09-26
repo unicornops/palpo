@@ -340,6 +340,14 @@ pub async fn join_room(
     // remote. Against servers that only answer make/send_join (e.g. Complement
     // test servers) those 404 and needlessly congest the outbound send queue,
     // delaying real traffic such as a redaction we're trying to deliver.
+    // Our own join event is stored below, once the room state it is checked
+    // against exists. Some residents (Continuwuity) list it in the send_join
+    // `state`; pushing it through the incoming-PDU pipeline here checks it
+    // against a room we have no state for yet, soft-fails it, and the
+    // soft-failed row then survives the final insert — which hides every
+    // pre-join event from the joining user (`joined_after` ignores
+    // soft-failed joins), i.e. they never see the room's history.
+    parsed_pdus.shift_remove(&join_event_id);
     let mut ordered_pdus: Vec<_> = parsed_pdus.into_iter().collect();
     ordered_pdus
         .sort_by_key(|(_, value)| value.get("depth").and_then(|v| v.as_integer()).unwrap_or(0));
@@ -370,6 +378,9 @@ pub async fn join_room(
             Ok(t) => t,
             Err(_) => continue,
         };
+        if event_id == join_event_id {
+            continue;
+        }
 
         let pdu = if let Some(pdu) = timeline::get_pdu(&event_id).await.optional()? {
             pdu
@@ -498,6 +509,17 @@ pub async fn join_room(
             room_id,
         )?)
         .on_conflict_do_nothing()
+        .execute(&mut connect().await?)
+        .await?;
+    // If an earlier step already stored this event (see above), the insert kept
+    // that row; make sure it is the accepted timeline event we are appending.
+    diesel::update(events::table.find(&join_event_id))
+        .set((
+            events::is_outlier.eq(false),
+            events::soft_failed.eq(false),
+            events::is_rejected.eq(false),
+            events::rejection_reason.eq(None::<String>),
+        ))
         .execute(&mut connect().await?)
         .await?;
 
